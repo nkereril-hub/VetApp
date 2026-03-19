@@ -167,5 +167,7 @@ def logout():
     return redirect(url_for('signup'))
 
 if __name__ == '__main__':
-    init_db() # This line ensures the tables are created!
-    app.run(debug=True, use_reloader=False)
+    import os
+    init_db()  # Keep this line so it builds your tables!
+    port = int(os.environ.get("PORT", 5000))
+    app.run(host='0.0.0.0', port=port)
