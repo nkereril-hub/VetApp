@@ -14,7 +14,7 @@ africastalking.initialize(USERNAME, API_KEY)
 sms = africastalking.SMS
 
 def get_db():
-    conn = sqlite3.connect('vetlem_pro.db', check_same_thread=False)
+    conn = sqlite3.connect('vetlem_v3.db', check_same_thread=False)
     conn.row_factory = sqlite3.Row
     return conn
 
