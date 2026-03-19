@@ -1,0 +1,62 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>Vetlem - Create Account</title>
+    <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css" rel="stylesheet">
+    <style>
+        body { background-color: #f8f9fa; }
+        .signup-container { max-width: 450px; margin-top: 80px; }
+        .card { border-radius: 15px; border: none; box-shadow: 0 4px 15px rgba(0,0,0,0.1); }
+    </style>
+</head>
+<body>
+    <div class="container signup-container">
+        <div class="card p-4">
+            <div class="text-center mb-4">
+                <h2 class="fw-bold text-dark">VETLEM</h2>
+                <p class="text-muted">Register your Agrovet business</p>
+            </div>
+
+            {% with messages = get_flashed_messages() %}
+              {% if messages %}
+                {% for message in messages %}
+                  <div class="alert alert-danger alert-dismissible fade show" role="alert">
+                    {{ message }}
+                    <button type="button" class="btn-close" data-bs-dismiss="alert"></button>
+                  </div>
+                {% endfor %}
+              {% endif %}
+            {% endwith %}
+
+            <form action="/signup" method="POST">
+                <div class="mb-3">
+                    <label class="form-label fw-bold small">Username</label>
+                    <input type="text" name="username" class="form-control py-2" placeholder="e.g. stephen_vet" required>
+                </div>
+
+                <div class="mb-3">
+                    <label class="form-label fw-bold small">Agrovet Name</label>
+                    <input type="text" name="agrovet_name" class="form-control py-2" placeholder="e.g. Isiolo Central Agrovet" required>
+                </div>
+
+                <div class="mb-3">
+                    <label class="form-label fw-bold small">Owner Phone Number</label>
+                    <input type="text" name="owner_phone" class="form-control py-2" placeholder="+2547XXXXXXXX" required>
+                    <small class="text-muted" style="font-size: 0.75rem;">This number will receive the 8 PM Daily Audit.</small>
+                </div>
+
+                <div class="mb-4">
+                    <label class="form-label fw-bold small">Password</label>
+                    <input type="password" name="password" class="form-control py-2" placeholder="**" required>
+                </div>
+
+                <button type="submit" class="btn btn-dark w-100 py-2 fw-bold">Create My Account</button>
+            </form>
+            
+            <div class="text-center mt-3">
+                <p class="small">Already have an account? <a href="/logout" class="text-decoration-none">Login</a></p>
+            </div>
+        </div>
+    </div>
+</body>
+</html>
