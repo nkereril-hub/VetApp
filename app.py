@@ -105,34 +105,25 @@ def index():
     db.close()
     return render_template('index.html', user=user, stats=stats, drugs=drugs, records=records)
 
-p DESC', (session['user_id'], 'Credit') if DATABASE_URL else (session['user_id'],))
-    
-    records = cur.fetchall()
-    cur.execute('SELECT SUM(cost) as total FROM treatments WHERE user_id = %s AND payment_method = %s' if DATABASE_URL else 'SELECT SUM(cost) as total FROM treatments WHERE user_id = ? AND payment_method = "Credit"', (session['user_id'], 'Credit') if DATABASE_URL else (session['user_id'],))
-    total = cur.fetchone()
-    
-    cur.close()
-    db.close()
-    return render_template('debtors.html', records=records, total=total['total'] or 0, search_val=search_query)
 @app.route('/debtors')
 def debtors():
     if 'user_id' not in session: return redirect(url_for('signup'))
     db = get_db()
     cur = db.cursor()
     
-    # 1. Get user info (Fixes the 'user' undefined error)
+    # 1. Get user info
     cur.execute("SELECT * FROM users WHERE id = %s" if DATABASE_URL else "SELECT * FROM users WHERE id = ?", (session['user_id'],))
     user = cur.fetchone()
 
     search_query = request.args.get('search', '')
     
-    # 2. Setup the SQL with safe quotes (Fixes the Syntax Error)
+    # 2. Setup the SQL
     if DATABASE_URL:
         base_sql = "SELECT * FROM treatments WHERE user_id = %s AND payment_method = 'Credit'"
     else:
         base_sql = "SELECT * FROM treatments WHERE user_id = ? AND payment_method = 'Credit'"
     
-    # 3. Handle Searching
+    # 3. Handle Searching and Sorting
     if search_query:
         search_param = f"%{search_query}%"
         if DATABASE_URL:
@@ -148,15 +139,21 @@ def debtors():
     sum_sql = "SELECT SUM(cost) as total FROM treatments WHERE user_id = %s AND payment_method = 'Credit'" if DATABASE_URL else "SELECT SUM(cost) as total FROM treatments WHERE user_id = ? AND payment_method = 'Credit'"
     cur.execute(sum_sql, (session['user_id'],))
     total_row = cur.fetchone()
-    total_val = total_row['total'] if total_row and total_row['total'] else 0
     
+    # Access total based on Row object type (SQLite vs PostgreSQL)
+    if total_row:
+        total_val = total_row['total'] if DATABASE_URL else total_row[0]
+    else:
+        total_val = 0
+        
     cur.close()
     db.close()
     
-    # 5. Send everything to the HTML
-    return render_template('debtors.html', user=user, records=records, total=total_val, search_val=search_query)
+    return render_template('debtors.html', user=user, records=records, total=total_val or 0, search_val=search_query)
+
 @app.route('/register_treatment', methods=['POST'])
 def register_treatment():
+    if 'user_id' not in session: return redirect(url_for('signup'))
     db = get_db()
     cur = db.cursor()
     cur.execute('SELECT * FROM inventory WHERE id=%s' if DATABASE_URL else 'SELECT * FROM inventory WHERE id=?', (request.form['drug_id'],))
@@ -201,8 +198,6 @@ def inventory():
 
 @app.route('/signup', methods=['GET', 'POST'])
 def signup():
-    with app.app_context():
-        init_db()
     if request.method == 'POST':
         db = get_db()
         cur = db.cursor()
@@ -210,9 +205,11 @@ def signup():
         cur.execute('INSERT INTO users (username, password, agrovet_name, owner_phone) VALUES (%s,%s,%s,%s)' if DATABASE_URL else 'INSERT INTO users (username, password, agrovet_name, owner_phone) VALUES (?,?,?,?)', 
                    (request.form['username'], pw, request.form['agrovet_name'], request.form['owner_phone']))
         db.commit()
+        
         cur.execute('SELECT id FROM users WHERE username=%s' if DATABASE_URL else 'SELECT id FROM users WHERE username=?', (request.form['username'],))
         user = cur.fetchone()
-        session['user_id'] = user['id']
+        session['user_id'] = user['id'] if DATABASE_URL else user[0]
+        
         cur.close()
         db.close()
         return redirect(url_for('index'))
@@ -224,9 +221,7 @@ def logout():
     return redirect(url_for('signup'))
 
 if __name__ == '__main__':
-    # This creates the tables if they don't exist yet
     with app.app_context():
         init_db()
-    
     port = int(os.environ.get("PORT", 5000))
     app.run(host='0.0.0.0', port=port)
