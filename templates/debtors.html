@@ -87,8 +87,7 @@
                                 <div class="d-flex justify-content-center gap-2 flex-wrap align-items-center">
                                     <a href="tel:{{ r.phone }}" class="btn btn-outline-primary btn-action">Call</a>
 
-                                    {% set wa_phone = r.phone.replace('+', '').replace(' ', '') %}
-                                    <a href="https://api.whatsapp.com/send?phone={{ wa_phone }}&text=Habari%20{{ r.owner_name }},%20huyu%20ni%20Daktari.%20Nakukumbusha%20salio%20lako%20la%20matibabu%20ya%20{{ r.animal_id }}%20ambayo%20ni%20KES%20{{ r.cost }}." 
+                                    <a href="{{ url_for('whatsapp_reminder', tid=r.id) }}" 
                                        target="_blank" 
                                        class="btn btn-success btn-action" 
                                        style="background-color: #25D366; border: none; color: white;">WhatsApp</a>
@@ -98,7 +97,7 @@
                                     </form>
 
                                     <form action="/clear_debt/{{ r.id }}" method="POST" class="d-inline m-0">
-                                        <button type="submit" class="btn btn-dark btn-action" onclick="return confirm('Amelipa deni lote?')">Clear</button>
+                                        <button type="submit" class="btn btn-dark btn-action" onclick="return confirm('Confirm clearing debt for {{ r.owner_name }}?')">Clear</button>
                                     </form>
                                 </div>
                             </td>
