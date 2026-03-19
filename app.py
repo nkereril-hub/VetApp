@@ -187,6 +187,49 @@ def register_treatment():
 def logout():
     session.clear()
     return redirect(url_for('login'))
+@app.route('/debtors')
+def debtors():
+    if 'user_id' not in session: return redirect(url_for('login'))
+    db = get_db()
+    cur = db.cursor()
+    
+    # 1. Get user info for header
+    cur.execute("SELECT * FROM users WHERE id = %s" if DATABASE_URL else "SELECT * FROM users WHERE id = ?", (session['user_id'],))
+    user = cur.fetchone()
+    
+    search_query = request.args.get('search', '')
+    
+    # 2. Get Debt Records
+    if DATABASE_URL:
+        base_sql = "SELECT * FROM treatments WHERE user_id = %s AND payment_method = 'Credit'"
+        if search_query:
+            search_param = f"%{search_query}%"
+            cur.execute(base_sql + " AND (owner_name ILIKE %s OR animal_id ILIKE %s) ORDER BY timestamp DESC", (session['user_id'], search_param, search_param))
+        else:
+            cur.execute(base_sql + " ORDER BY timestamp DESC", (session['user_id'],))
+    else:
+        base_sql = "SELECT * FROM treatments WHERE user_id = ? AND payment_method = 'Credit'"
+        if search_query:
+            search_param = f"%{search_query}%"
+            cur.execute(base_sql + " AND (owner_name LIKE ? OR animal_id LIKE ?) ORDER BY timestamp DESC", (session['user_id'], search_param, search_param))
+        else:
+            cur.execute(base_sql + " ORDER BY timestamp DESC", (session['user_id'],))
+    
+    records = cur.fetchall()
+
+    # 3. Get Total Debt
+    cur.execute("SELECT SUM(cost) as total FROM treatments WHERE user_id = %s AND payment_method = 'Credit'" if DATABASE_URL else "SELECT SUM(cost) as total FROM treatments WHERE user_id = ? AND payment_method = 'Credit'", (session['user_id'],))
+    total_row = cur.fetchone()
+    
+    # Handle the fact that Postgres returns a dict and SQLite might return a tuple/row
+    total_val = 0
+    if total_row:
+        total_val = total_row['total'] if DATABASE_URL else total_row[0]
+    
+    cur.close()
+    db.close()
+    
+    return render_template('debtors.html', user=user, records=records, total=total_val or 0, search_val=search_query)
 
 # --- PRODUCTION READY INIT ---
 # This runs on every startup, whether Gunicorn or Local
