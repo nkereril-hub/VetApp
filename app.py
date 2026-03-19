@@ -6,6 +6,7 @@ from psycopg2.extras import RealDictCursor
 from datetime import datetime, timedelta
 from werkzeug.security import generate_password_hash, check_password_hash
 import africastalking
+import urllib.parse
 
 app = Flask(__name__)
 app.secret_key = os.environ.get('SECRET_KEY', 'vetlem_isiolo_2026')
@@ -21,11 +22,9 @@ DATABASE_URL = os.environ.get('DATABASE_URL')
 
 def get_db():
     if DATABASE_URL:
-        # Connect to Render PostgreSQL
         conn = psycopg2.connect(DATABASE_URL, cursor_factory=RealDictCursor)
         return conn
     else:
-        # Connect to Local SQLite (for your laptop)
         conn = sqlite3.connect('vetlem_v3.db', check_same_thread=False)
         conn.row_factory = sqlite3.Row
         return conn
@@ -33,39 +32,11 @@ def get_db():
 def init_db():
     db = get_db()
     cur = db.cursor()
-    # Logic to handle ID types for both database types
     id_type = "SERIAL PRIMARY KEY" if DATABASE_URL else "INTEGER PRIMARY KEY AUTOINCREMENT"
     
-    cur.execute(f'''CREATE TABLE IF NOT EXISTS users (
-        id {id_type},
-        username TEXT UNIQUE,
-        password TEXT,
-        agrovet_name TEXT,
-        owner_phone TEXT
-    )''')
-    cur.execute(f'''CREATE TABLE IF NOT EXISTS inventory (
-        id {id_type},
-        user_id INTEGER,
-        drug_name TEXT,
-        quantity INTEGER,
-        buying_price REAL,
-        price REAL,
-        withdrawal_days INTEGER
-    )''')
-    cur.execute(f'''CREATE TABLE IF NOT EXISTS treatments (
-        id {id_type},
-        user_id INTEGER,
-        owner_name TEXT,
-        phone TEXT,
-        animal_id TEXT,
-        diagnosis TEXT,
-        drug_name TEXT,
-        cost REAL,
-        buying_price_at_time REAL,
-        payment_method TEXT,
-        safe_date TEXT,
-        timestamp TIMESTAMP DEFAULT CURRENT_TIMESTAMP
-    )''')
+    cur.execute(f'CREATE TABLE IF NOT EXISTS users (id {id_type}, username TEXT UNIQUE, password TEXT, agrovet_name TEXT, owner_phone TEXT)')
+    cur.execute(f'CREATE TABLE IF NOT EXISTS inventory (id {id_type}, user_id INTEGER, drug_name TEXT, quantity INTEGER, buying_price REAL, price REAL, withdrawal_days INTEGER)')
+    cur.execute(f'CREATE TABLE IF NOT EXISTS treatments (id {id_type}, user_id INTEGER, owner_name TEXT, phone TEXT, animal_id TEXT, diagnosis TEXT, drug_name TEXT, cost REAL, buying_price_at_time REAL, payment_method TEXT, safe_date TEXT, timestamp TIMESTAMP DEFAULT CURRENT_TIMESTAMP)')
     db.commit()
     cur.close()
     db.close()
@@ -94,13 +65,10 @@ def index():
     
     cur.execute(query, (session['user_id'],))
     stats = cur.fetchone()
-    
     cur.execute('SELECT * FROM inventory WHERE user_id=%s AND quantity > 0' if DATABASE_URL else 'SELECT * FROM inventory WHERE user_id=? AND quantity > 0', (session['user_id'],))
     drugs = cur.fetchall()
-    
     cur.execute('SELECT * FROM treatments WHERE user_id=%s ORDER BY id DESC LIMIT 10' if DATABASE_URL else 'SELECT * FROM treatments WHERE user_id=? ORDER BY id DESC LIMIT 10', (session['user_id'],))
     records = cur.fetchall()
-    
     cur.close()
     db.close()
     return render_template('index.html', user=user, stats=stats, drugs=drugs, records=records)
@@ -110,46 +78,70 @@ def debtors():
     if 'user_id' not in session: return redirect(url_for('signup'))
     db = get_db()
     cur = db.cursor()
-    
-    # 1. Get user info
     cur.execute("SELECT * FROM users WHERE id = %s" if DATABASE_URL else "SELECT * FROM users WHERE id = ?", (session['user_id'],))
     user = cur.fetchone()
-
     search_query = request.args.get('search', '')
     
-    # 2. Setup the SQL
     if DATABASE_URL:
         base_sql = "SELECT * FROM treatments WHERE user_id = %s AND payment_method = 'Credit'"
     else:
         base_sql = "SELECT * FROM treatments WHERE user_id = ? AND payment_method = 'Credit'"
     
-    # 3. Handle Searching and Sorting
     if search_query:
         search_param = f"%{search_query}%"
-        if DATABASE_URL:
-            cur.execute(base_sql + " AND (owner_name ILIKE %s OR animal_id ILIKE %s) ORDER BY timestamp DESC", (session['user_id'], search_param, search_param))
-        else:
-            cur.execute(base_sql + " AND (owner_name LIKE ? OR animal_id LIKE ?) ORDER BY timestamp DESC", (session['user_id'], search_param, search_param))
+        cur.execute(base_sql + (" AND (owner_name ILIKE %s OR animal_id ILIKE %s)" if DATABASE_URL else " AND (owner_name LIKE ? OR animal_id LIKE ?)") + " ORDER BY timestamp DESC", (session['user_id'], search_param, search_param))
     else:
         cur.execute(base_sql + " ORDER BY timestamp DESC", (session['user_id'],))
     
     records = cur.fetchall()
-    
-    # 4. Calculate total debt
-    sum_sql = "SELECT SUM(cost) as total FROM treatments WHERE user_id = %s AND payment_method = 'Credit'" if DATABASE_URL else "SELECT SUM(cost) as total FROM treatments WHERE user_id = ? AND payment_method = 'Credit'"
-    cur.execute(sum_sql, (session['user_id'],))
+    cur.execute("SELECT SUM(cost) as total FROM treatments WHERE user_id = %s AND payment_method = 'Credit'" if DATABASE_URL else "SELECT SUM(cost) as total FROM treatments WHERE user_id = ? AND payment_method = 'Credit'", (session['user_id'],))
     total_row = cur.fetchone()
-    
-    # Access total based on Row object type (SQLite vs PostgreSQL)
-    if total_row:
-        total_val = total_row['total'] if DATABASE_URL else total_row[0]
-    else:
-        total_val = 0
-        
+    total_val = (total_row['total'] if DATABASE_URL else total_row[0]) or 0
     cur.close()
     db.close()
-    
-    return render_template('debtors.html', user=user, records=records, total=total_val or 0, search_val=search_query)
+    return render_template('debtors.html', user=user, records=records, total=total_val, search_val=search_query)
+
+# --- NEW DEBT MANAGEMENT ROUTES ---
+
+@app.route('/clear_debt/<int:tid>', methods=['POST'])
+def clear_debt(tid):
+    if 'user_id' not in session: return redirect(url_for('signup'))
+    db = get_db()
+    cur = db.cursor()
+    cur.execute("UPDATE treatments SET payment_method = 'Cash' WHERE id = %s AND user_id = %s" if DATABASE_URL else "UPDATE treatments SET payment_method = 'Cash' WHERE id = ? AND user_id = ?", (tid, session['user_id']))
+    db.commit()
+    cur.close()
+    db.close()
+    flash("Debt cleared successfully!")
+    return redirect(url_for('debtors'))
+
+@app.route('/whatsapp_reminder/<int:tid>')
+def whatsapp_reminder(tid):
+    db = get_db()
+    cur = db.cursor()
+    cur.execute("SELECT * FROM treatments WHERE id = %s" if DATABASE_URL else "SELECT * FROM treatments WHERE id = ?", (tid,))
+    r = cur.fetchone()
+    cur.close()
+    db.close()
+    msg = f"Habari {r['owner_name']}, reminder from Vet-Tech to settle KES {r['cost']} for {r['drug_name']} treatment."
+    return redirect(f"https://wa.me/{r['phone']}?text={urllib.parse.quote(msg)}")
+
+@app.route('/send_reminder/<int:tid>', methods=['POST'])
+def send_reminder(tid):
+    db = get_db()
+    cur = db.cursor()
+    cur.execute("SELECT * FROM treatments WHERE id = %s" if DATABASE_URL else "SELECT * FROM treatments WHERE id = ?", (tid,))
+    r = cur.fetchone()
+    cur.close()
+    db.close()
+    try:
+        sms.send(f"Habari {r['owner_name']}, please settle your debt of KES {r['cost']} at our Agrovet.", [r['phone']])
+        flash("SMS Reminder Sent!")
+    except:
+        flash("SMS Failed - Check API Key")
+    return redirect(url_for('debtors'))
+
+# --- EXISTING ROUTES (RESTORED) ---
 
 @app.route('/register_treatment', methods=['POST'])
 def register_treatment():
@@ -158,19 +150,9 @@ def register_treatment():
     cur = db.cursor()
     cur.execute('SELECT * FROM inventory WHERE id=%s' if DATABASE_URL else 'SELECT * FROM inventory WHERE id=?', (request.form['drug_id'],))
     drug = cur.fetchone()
-    
     final_price = float(request.form['final_price'])
     safe_date = (datetime.now() + timedelta(days=drug['withdrawal_days'])).strftime('%d-%b-%Y')
-    
-    cur.execute('''INSERT INTO treatments 
-        (user_id, owner_name, phone, animal_id, diagnosis, drug_name, cost, buying_price_at_time, payment_method, safe_date) 
-        VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s)''' if DATABASE_URL else '''INSERT INTO treatments 
-        (user_id, owner_name, phone, animal_id, diagnosis, drug_name, cost, buying_price_at_time, payment_method, safe_date) 
-        VALUES (?,?,?,?,?,?,?,?,?,?)''',
-        (session['user_id'], request.form['owner'], request.form['phone'], 
-         request.form['animal_id'], request.form.get('diagnosis', ''), drug['drug_name'], 
-         final_price, drug['buying_price'], request.form['payment_method'], safe_date))
-    
+    cur.execute('''INSERT INTO treatments (user_id, owner_name, phone, animal_id, diagnosis, drug_name, cost, buying_price_at_time, payment_method, safe_date) VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s)''' if DATABASE_URL else '''INSERT INTO treatments (user_id, owner_name, phone, animal_id, diagnosis, drug_name, cost, buying_price_at_time, payment_method, safe_date) VALUES (?,?,?,?,?,?,?,?,?,?)''', (session['user_id'], request.form['owner'], request.form['phone'], request.form['animal_id'], request.form.get('diagnosis', ''), drug['drug_name'], final_price, drug['buying_price'], request.form['payment_method'], safe_date))
     cur.execute('UPDATE inventory SET quantity = quantity - 1 WHERE id=%s' if DATABASE_URL else 'UPDATE inventory SET quantity = quantity - 1 WHERE id=?', (request.form['drug_id'],))
     db.commit()
     cur.close()
@@ -184,12 +166,8 @@ def inventory():
     db = get_db()
     cur = db.cursor()
     if request.method == 'POST':
-        cur.execute('''INSERT INTO inventory (user_id, drug_name, quantity, buying_price, price, withdrawal_days) 
-                    VALUES (%s,%s,%s,%s,%s,%s)''' if DATABASE_URL else '''INSERT INTO inventory (user_id, drug_name, quantity, buying_price, price, withdrawal_days) 
-                    VALUES (?,?,?,?,?,?)''',
-                   (session['user_id'], request.form['name'], request.form['qty'], request.form['b_price'], request.form['s_price'], request.form['withdrawal']))
+        cur.execute('''INSERT INTO inventory (user_id, drug_name, quantity, buying_price, price, withdrawal_days) VALUES (%s,%s,%s,%s,%s,%s)''' if DATABASE_URL else '''INSERT INTO inventory (user_id, drug_name, quantity, buying_price, price, withdrawal_days) VALUES (?,?,?,?,?,?)''', (session['user_id'], request.form['name'], request.form['qty'], request.form['b_price'], request.form['s_price'], request.form['withdrawal']))
         db.commit()
-    
     cur.execute('SELECT * FROM inventory WHERE user_id=%s' if DATABASE_URL else 'SELECT * FROM inventory WHERE user_id=?', (session['user_id'],))
     items = cur.fetchall()
     cur.close()
@@ -202,17 +180,18 @@ def signup():
         db = get_db()
         cur = db.cursor()
         pw = generate_password_hash(request.form['password'])
-        cur.execute('INSERT INTO users (username, password, agrovet_name, owner_phone) VALUES (%s,%s,%s,%s)' if DATABASE_URL else 'INSERT INTO users (username, password, agrovet_name, owner_phone) VALUES (?,?,?,?)', 
-                   (request.form['username'], pw, request.form['agrovet_name'], request.form['owner_phone']))
-        db.commit()
-        
-        cur.execute('SELECT id FROM users WHERE username=%s' if DATABASE_URL else 'SELECT id FROM users WHERE username=?', (request.form['username'],))
-        user = cur.fetchone()
-        session['user_id'] = user['id'] if DATABASE_URL else user[0]
-        
-        cur.close()
-        db.close()
-        return redirect(url_for('index'))
+        try:
+            cur.execute('INSERT INTO users (username, password, agrovet_name, owner_phone) VALUES (%s,%s,%s,%s)' if DATABASE_URL else 'INSERT INTO users (username, password, agrovet_name, owner_phone) VALUES (?,?,?,?)', (request.form['username'], pw, request.form['agrovet_name'], request.form['owner_phone']))
+            db.commit()
+            cur.execute('SELECT id FROM users WHERE username=%s' if DATABASE_URL else 'SELECT id FROM users WHERE username=?', (request.form['username'],))
+            user = cur.fetchone()
+            session['user_id'] = user['id'] if DATABASE_URL else user[0]
+            cur.close()
+            db.close()
+            return redirect(url_for('index'))
+        except:
+            flash("Username already exists. Please login or use a different email.")
+            return redirect(url_for('signup'))
     return render_template('signup.html')
 
 @app.route('/logout')
@@ -221,7 +200,6 @@ def logout():
     return redirect(url_for('signup'))
 
 if __name__ == '__main__':
-    with app.app_context():
-        init_db()
+    with app.app_context(): init_db()
     port = int(os.environ.get("PORT", 5000))
     app.run(host='0.0.0.0', port=port)
