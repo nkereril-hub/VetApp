@@ -33,7 +33,6 @@ def init_db():
     db = get_db()
     cur = db.cursor()
     id_type = "SERIAL PRIMARY KEY" if DATABASE_URL else "INTEGER PRIMARY KEY AUTOINCREMENT"
-    
     cur.execute(f'CREATE TABLE IF NOT EXISTS users (id {id_type}, username TEXT UNIQUE, password TEXT, agrovet_name TEXT, owner_phone TEXT)')
     cur.execute(f'CREATE TABLE IF NOT EXISTS inventory (id {id_type}, user_id INTEGER, drug_name TEXT, quantity INTEGER, buying_price REAL, price REAL, withdrawal_days INTEGER)')
     cur.execute(f'CREATE TABLE IF NOT EXISTS treatments (id {id_type}, user_id INTEGER, owner_name TEXT, phone TEXT, animal_id TEXT, diagnosis TEXT, drug_name TEXT, cost REAL, buying_price_at_time REAL, payment_method TEXT, safe_date TEXT, timestamp TIMESTAMP DEFAULT CURRENT_TIMESTAMP)')
@@ -41,16 +40,61 @@ def init_db():
     cur.close()
     db.close()
 
-# --- ROUTES ---
+# --- LOGIN & SIGNUP LOGIC (THE FIX) ---
+
+@app.route('/login', methods=['GET', 'POST'])
+def login():
+    if request.method == 'POST':
+        db = get_db()
+        cur = db.cursor()
+        cur.execute('SELECT * FROM users WHERE username=%s' if DATABASE_URL else 'SELECT * FROM users WHERE username=?', (request.form['username'],))
+        user = cur.fetchone()
+        cur.close()
+        db.close()
+        
+        if user and check_password_hash(user['password'], request.form['password']):
+            session['user_id'] = user['id']
+            return redirect(url_for('index'))
+        else:
+            flash("Invalid username or password")
+    return render_template('signup.html') # Reusing signup for login form
+
+@app.route('/signup', methods=['GET', 'POST'])
+def signup():
+    if request.method == 'POST':
+        db = get_db()
+        cur = db.cursor()
+        pw = generate_password_hash(request.form['password'])
+        try:
+            cur.execute('INSERT INTO users (username, password, agrovet_name, owner_phone) VALUES (%s,%s,%s,%s)' if DATABASE_URL else 'INSERT INTO users (username, password, agrovet_name, owner_phone) VALUES (?,?,?,?)', (request.form['username'], pw, request.form['agrovet_name'], request.form['owner_phone']))
+            db.commit()
+            # Log them in immediately after signup
+            cur.execute('SELECT id FROM users WHERE username=%s' if DATABASE_URL else 'SELECT id FROM users WHERE username=?', (request.form['username'],))
+            user = cur.fetchone()
+            session['user_id'] = user['id']
+            cur.close()
+            db.close()
+            return redirect(url_for('index'))
+        except Exception as e:
+            flash("That email is already registered. Please try logging in instead.")
+            return redirect(url_for('login'))
+    return render_template('signup.html')
+
+# --- MAIN DASHBOARD ---
 
 @app.route('/')
 def index():
-    if 'user_id' not in session: return redirect(url_for('signup'))
+    if 'user_id' not in session: return redirect(url_for('login'))
     db = get_db()
     cur = db.cursor()
     cur.execute('SELECT * FROM users WHERE id = %s' if DATABASE_URL else 'SELECT * FROM users WHERE id = ?', (session['user_id'],))
     user = cur.fetchone()
     
+    # Check if user exists in session but not in DB (happens if DB was reset)
+    if not user:
+        session.clear()
+        return redirect(url_for('login'))
+
     query = '''SELECT 
         SUM(CASE WHEN payment_method='Cash' THEN cost ELSE 0 END) as cash, 
         SUM(CASE WHEN payment_method='M-Pesa' THEN cost ELSE 0 END) as mpesa, 
@@ -73,9 +117,32 @@ def index():
     db.close()
     return render_template('index.html', user=user, stats=stats, drugs=drugs, records=records)
 
+# --- INVENTORY & OTHER ROUTES (CLEANED UP) ---
+
+@app.route('/inventory', methods=['GET', 'POST'])
+def inventory():
+    if 'user_id' not in session: return redirect(url_for('login'))
+    db = get_db()
+    cur = db.cursor()
+    
+    # 1. Get user info for the header
+    cur.execute('SELECT * FROM users WHERE id = %s' if DATABASE_URL else 'SELECT * FROM users WHERE id = ?', (session['user_id'],))
+    user = cur.fetchone()
+
+    if request.method == 'POST':
+        cur.execute('''INSERT INTO inventory (user_id, drug_name, quantity, buying_price, price, withdrawal_days) VALUES (%s,%s,%s,%s,%s,%s)''' if DATABASE_URL else '''INSERT INTO inventory (user_id, drug_name, quantity, buying_price, price, withdrawal_days) VALUES (?,?,?,?,?,?)''', (session['user_id'], request.form['name'], request.form['qty'], request.form['b_price'], request.form['s_price'], request.form['withdrawal']))
+        db.commit()
+    
+    cur.execute('SELECT * FROM inventory WHERE user_id=%s' if DATABASE_URL else 'SELECT * FROM inventory WHERE user_id=?', (session['user_id'],))
+    items = cur.fetchall()
+    cur.close()
+    db.close()
+    return render_template('inventory.html', items=items, user=user)
+
+# --- DEBTORS & SMS LOGIC ---
 @app.route('/debtors')
 def debtors():
-    if 'user_id' not in session: return redirect(url_for('signup'))
+    if 'user_id' not in session: return redirect(url_for('login'))
     db = get_db()
     cur = db.cursor()
     cur.execute("SELECT * FROM users WHERE id = %s" if DATABASE_URL else "SELECT * FROM users WHERE id = ?", (session['user_id'],))
@@ -101,51 +168,9 @@ def debtors():
     db.close()
     return render_template('debtors.html', user=user, records=records, total=total_val, search_val=search_query)
 
-# --- NEW DEBT MANAGEMENT ROUTES ---
-
-@app.route('/clear_debt/<int:tid>', methods=['POST'])
-def clear_debt(tid):
-    if 'user_id' not in session: return redirect(url_for('signup'))
-    db = get_db()
-    cur = db.cursor()
-    cur.execute("UPDATE treatments SET payment_method = 'Cash' WHERE id = %s AND user_id = %s" if DATABASE_URL else "UPDATE treatments SET payment_method = 'Cash' WHERE id = ? AND user_id = ?", (tid, session['user_id']))
-    db.commit()
-    cur.close()
-    db.close()
-    flash("Debt cleared successfully!")
-    return redirect(url_for('debtors'))
-
-@app.route('/whatsapp_reminder/<int:tid>')
-def whatsapp_reminder(tid):
-    db = get_db()
-    cur = db.cursor()
-    cur.execute("SELECT * FROM treatments WHERE id = %s" if DATABASE_URL else "SELECT * FROM treatments WHERE id = ?", (tid,))
-    r = cur.fetchone()
-    cur.close()
-    db.close()
-    msg = f"Habari {r['owner_name']}, reminder from Vet-Tech to settle KES {r['cost']} for {r['drug_name']} treatment."
-    return redirect(f"https://wa.me/{r['phone']}?text={urllib.parse.quote(msg)}")
-
-@app.route('/send_reminder/<int:tid>', methods=['POST'])
-def send_reminder(tid):
-    db = get_db()
-    cur = db.cursor()
-    cur.execute("SELECT * FROM treatments WHERE id = %s" if DATABASE_URL else "SELECT * FROM treatments WHERE id = ?", (tid,))
-    r = cur.fetchone()
-    cur.close()
-    db.close()
-    try:
-        sms.send(f"Habari {r['owner_name']}, please settle your debt of KES {r['cost']} at our Agrovet.", [r['phone']])
-        flash("SMS Reminder Sent!")
-    except:
-        flash("SMS Failed - Check API Key")
-    return redirect(url_for('debtors'))
-
-# --- EXISTING ROUTES (RESTORED) ---
-
 @app.route('/register_treatment', methods=['POST'])
 def register_treatment():
-    if 'user_id' not in session: return redirect(url_for('signup'))
+    if 'user_id' not in session: return redirect(url_for('login'))
     db = get_db()
     cur = db.cursor()
     cur.execute('SELECT * FROM inventory WHERE id=%s' if DATABASE_URL else 'SELECT * FROM inventory WHERE id=?', (request.form['drug_id'],))
@@ -160,44 +185,10 @@ def register_treatment():
     flash(f"Record Saved! Safe Date: {safe_date}")
     return redirect(url_for('index'))
 
-@app.route('/inventory', methods=['GET', 'POST'])
-def inventory():
-    if 'user_id' not in session: return redirect(url_for('signup'))
-    db = get_db()
-    cur = db.cursor()
-    if request.method == 'POST':
-        cur.execute('''INSERT INTO inventory (user_id, drug_name, quantity, buying_price, price, withdrawal_days) VALUES (%s,%s,%s,%s,%s,%s)''' if DATABASE_URL else '''INSERT INTO inventory (user_id, drug_name, quantity, buying_price, price, withdrawal_days) VALUES (?,?,?,?,?,?)''', (session['user_id'], request.form['name'], request.form['qty'], request.form['b_price'], request.form['s_price'], request.form['withdrawal']))
-        db.commit()
-    cur.execute('SELECT * FROM inventory WHERE user_id=%s' if DATABASE_URL else 'SELECT * FROM inventory WHERE user_id=?', (session['user_id'],))
-    items = cur.fetchall()
-    cur.close()
-    db.close()
-    return render_template('inventory.html', items=items)
-
-@app.route('/signup', methods=['GET', 'POST'])
-def signup():
-    if request.method == 'POST':
-        db = get_db()
-        cur = db.cursor()
-        pw = generate_password_hash(request.form['password'])
-        try:
-            cur.execute('INSERT INTO users (username, password, agrovet_name, owner_phone) VALUES (%s,%s,%s,%s)' if DATABASE_URL else 'INSERT INTO users (username, password, agrovet_name, owner_phone) VALUES (?,?,?,?)', (request.form['username'], pw, request.form['agrovet_name'], request.form['owner_phone']))
-            db.commit()
-            cur.execute('SELECT id FROM users WHERE username=%s' if DATABASE_URL else 'SELECT id FROM users WHERE username=?', (request.form['username'],))
-            user = cur.fetchone()
-            session['user_id'] = user['id'] if DATABASE_URL else user[0]
-            cur.close()
-            db.close()
-            return redirect(url_for('index'))
-        except:
-            flash("Username already exists. Please login or use a different email.")
-            return redirect(url_for('signup'))
-    return render_template('signup.html')
-
 @app.route('/logout')
 def logout():
     session.clear()
-    return redirect(url_for('signup'))
+    return redirect(url_for('login'))
 
 if __name__ == '__main__':
     with app.app_context(): init_db()
