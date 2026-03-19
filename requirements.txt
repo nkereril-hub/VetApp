@@ -1,3 +1,5 @@
 Flask
 africastalking
 gunicorn
+pscopgy2-binary
+werkzeug
