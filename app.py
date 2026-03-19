@@ -195,6 +195,8 @@ def inventory():
 
 @app.route('/signup', methods=['GET', 'POST'])
 def signup():
+    with app.app_context():
+        init_db()
     if request.method == 'POST':
         db = get_db()
         cur = db.cursor()
