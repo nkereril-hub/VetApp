@@ -105,22 +105,7 @@ def index():
     db.close()
     return render_template('index.html', user=user, stats=stats, drugs=drugs, records=records)
 
-@app.route('/debtors')
-def debtors():
-    if 'user_id' not in session: return redirect(url_for('signup'))
-    db = get_db()
-    cur = db.cursor()
-    search_query = request.args.get('search', '')
-    
-    base_sql = 'SELECT * FROM treatments WHERE user_id = %s AND payment_method = %s' if DATABASE_URL else 'SELECT * FROM treatments WHERE user_id = ? AND payment_method = "Credit"'
-    
-    if search_query:
-        if DATABASE_URL:
-            cur.execute(base_sql + ' AND (owner_name ILIKE %s OR animal_id ILIKE %s) ORDER BY timestamp DESC', (session['user_id'], 'Credit', f'%{search_query}%', f'%{search_query}%'))
-        else:
-            cur.execute(base_sql + ' AND (owner_name LIKE ? OR animal_id LIKE ?) ORDER BY timestamp DESC', (session['user_id'], f'%{search_query}%', f'%{search_query}%'))
-    else:
-        cur.execute(base_sql + ' ORDER BY timestamp DESC', (session['user_id'], 'Credit') if DATABASE_URL else (session['user_id'],))
+p DESC', (session['user_id'], 'Credit') if DATABASE_URL else (session['user_id'],))
     
     records = cur.fetchall()
     cur.execute('SELECT SUM(cost) as total FROM treatments WHERE user_id = %s AND payment_method = %s' if DATABASE_URL else 'SELECT SUM(cost) as total FROM treatments WHERE user_id = ? AND payment_method = "Credit"', (session['user_id'], 'Credit') if DATABASE_URL else (session['user_id'],))
@@ -129,8 +114,36 @@ def debtors():
     cur.close()
     db.close()
     return render_template('debtors.html', records=records, total=total['total'] or 0, search_val=search_query)
+@app.route('/debtors')
+def debtors():
+    if 'user_id' not in session: return redirect(url_for('signup'))
+    db = get_db()
+    cur = db.cursor()
+    
+    # --- 1. ADD THIS PART TO GET THE USER ---
+    cur.execute("SELECT * FROM users WHERE id = %s" if DATABASE_URL else "SELECT * FROM users WHERE id = ?", (session['user_id'],))
+    user = cur.fetchone()
+    # ----------------------------------------
 
-@app.route('/whatsapp_reminder/<int:tid>')
+    search_query = request.args.get('search', '')
+    
+    base_sql = 'SELECT * FROM treatments WHERE user_id = %s AND payment_method = %s' if DATABASE_URL else 'SELECT * FROM treatments WHERE user_id = ? AND payment_method = "Credit"'
+    
+    if search_query:
+        if DATABASE_URL:
+            cur.execute(base_sql + ' AND (owner_name ILIKE %s OR animal_id ILIKE %s) ORDER BY timestamp DESC', (session['user_id'], 'Credit', f'%{search_query}%', f'%{search_query}%'))
+        else:
+            cur.execute(base_sql + ' AND (owner_name LIKE ? OR animal_id LIKE ?) ORDER BY timestamp DESC', (session['user_id'], f'%{search_query}%', f'%{search_query}%', 'Credit'))
+    else:
+        cur.execute(base_sql + ' ORDER BY timestamp DESC', (session['user_id'], 'Credit'))
+    
+    records = cur.fetchall()
+    
+    cur.execute('SELECT SUM(cost) as total FROM treatments WHERE user_id = %s AND payment_method = %s' if DATABASE_URL else 'SELECT SUM(cost) as total FROM treatments WHERE user_id = ? AND payment_method = "Credit"', (session['user_id'], 'Credit'))
+    total = cur.fetchone()
+    
+    # --- 2. UPDATE THE RETURN LINE TO INCLUDE user=user ---
+    return render_template('debtors.html', user=user, records=records, total=total['total'] or 0, search_val=search_query)@app.route('/whatsapp_reminder/<int:tid>')
 def whatsapp_reminder(tid):
     if 'user_id' not in session: return redirect(url_for('signup'))
     db = get_db()
