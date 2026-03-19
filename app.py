@@ -120,48 +120,41 @@ def debtors():
     db = get_db()
     cur = db.cursor()
     
-    # --- 1. ADD THIS PART TO GET THE USER ---
+    # 1. Get user info (Fixes the 'user' undefined error)
     cur.execute("SELECT * FROM users WHERE id = %s" if DATABASE_URL else "SELECT * FROM users WHERE id = ?", (session['user_id'],))
     user = cur.fetchone()
-    # ----------------------------------------
 
     search_query = request.args.get('search', '')
     
-    base_sql = 'SELECT * FROM treatments WHERE user_id = %s AND payment_method = %s' if DATABASE_URL else 'SELECT * FROM treatments WHERE user_id = ? AND payment_method = "Credit"'
-    
-    if search_query:
-        if DATABASE_URL:
-            cur.execute(base_sql + ' AND (owner_name ILIKE %s OR animal_id ILIKE %s) ORDER BY timestamp DESC', (session['user_id'], 'Credit', f'%{search_query}%', f'%{search_query}%'))
-        else:
-            cur.execute(base_sql + ' AND (owner_name LIKE ? OR animal_id LIKE ?) ORDER BY timestamp DESC', (session['user_id'], f'%{search_query}%', f'%{search_query}%', 'Credit'))
+    # 2. Setup the SQL with safe quotes (Fixes the Syntax Error)
+    if DATABASE_URL:
+        base_sql = "SELECT * FROM treatments WHERE user_id = %s AND payment_method = 'Credit'"
     else:
-        cur.execute(base_sql + ' ORDER BY timestamp DESC', (session['user_id'], 'Credit'))
+        base_sql = "SELECT * FROM treatments WHERE user_id = ? AND payment_method = 'Credit'"
+    
+    # 3. Handle Searching
+    if search_query:
+        search_param = f"%{search_query}%"
+        if DATABASE_URL:
+            cur.execute(base_sql + " AND (owner_name ILIKE %s OR animal_id ILIKE %s) ORDER BY timestamp DESC", (session['user_id'], search_param, search_param))
+        else:
+            cur.execute(base_sql + " AND (owner_name LIKE ? OR animal_id LIKE ?) ORDER BY timestamp DESC", (session['user_id'], search_param, search_param))
+    else:
+        cur.execute(base_sql + " ORDER BY timestamp DESC", (session['user_id'],))
     
     records = cur.fetchall()
     
-    cur.execute('SELECT SUM(cost) as total FROM treatments WHERE user_id = %s AND payment_method = %s' if DATABASE_URL else 'SELECT SUM(cost) as total FROM treatments WHERE user_id = ? AND payment_method = "Credit"', (session['user_id'], 'Credit'))
-    total = cur.fetchone()
+    # 4. Calculate total debt
+    sum_sql = "SELECT SUM(cost) as total FROM treatments WHERE user_id = %s AND payment_method = 'Credit'" if DATABASE_URL else "SELECT SUM(cost) as total FROM treatments WHERE user_id = ? AND payment_method = 'Credit'"
+    cur.execute(sum_sql, (session['user_id'],))
+    total_row = cur.fetchone()
+    total_val = total_row['total'] if total_row and total_row['total'] else 0
     
-    # --- 2. UPDATE THE RETURN LINE TO INCLUDE user=user ---
-    return render_template('debtors.html', user=user, records=records, total=total['total'] or 0, search_val=search_query)@app.route('/whatsapp_reminder/<int:tid>')
-def whatsapp_reminder(tid):
-    if 'user_id' not in session: return redirect(url_for('signup'))
-    db = get_db()
-    cur = db.cursor()
-    cur.execute('SELECT t., u.agrovet_name FROM treatments t JOIN users u ON t.user_id = u.id WHERE t.id = %s' if DATABASE_URL else 'SELECT t., u.agrovet_name FROM treatments t JOIN users u ON t.user_id = u.id WHERE t.id = ?', (tid,))
-    r = cur.fetchone()
+    cur.close()
+    db.close()
     
-    if r:
-        f_phone = r['phone']
-        if f_phone.startswith('0'): f_phone = "254" + f_phone[1:]
-        elif f_phone.startswith('+'): f_phone = f_phone[1:]
-            
-        message = f"Habari {r['owner_name']}, Hii ni kumbusho kutoka {r['agrovet_name']}. Una deni la KES {r['cost']} la matibabu ya {r['animal_id']}. Ahsante!"
-        return redirect(f"https://wa.me/{f_phone}?text={message}")
-    
-    flash("Record not found")
-    return redirect(url_for('debtors'))
-
+    # 5. Send everything to the HTML
+    return render_template('debtors.html', user=user, records=records, total=total_val, search_val=search_query)
 @app.route('/register_treatment', methods=['POST'])
 def register_treatment():
     db = get_db()
