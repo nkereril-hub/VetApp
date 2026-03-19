@@ -1,80 +1,4 @@
-<!DOCTYPE html>
-<html lang="en">
-<head>
-    <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Vetlem Debtors - {{ user.agrovet_name }}</title>
-    <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css" rel="stylesheet">
-    <style>
-        :root { --vet-dark: #1a1a1a; --vet-green: #2ecc71; --vet-red: #e74c3c; }
-        body { background-color: #f4f7f6; font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; }
-        .navbar { background-color: var(--vet-dark); }
-        .debt-card { border: none; border-radius: 15px; box-shadow: 0 4px 20px rgba(0,0,0,0.08); background: white; overflow: hidden; }
-        .total-banner { background: white; border-left: 5px solid var(--vet-red); border-radius: 12px; padding: 20px; margin-bottom: 25px; }
-        .btn-action { font-size: 0.75rem; font-weight: 600; padding: 6px 12px; border-radius: 8px; transition: 0.2s; }
-        .btn-action:hover { transform: translateY(-2px); }
-        .search-container { background: #fff; padding: 15px; border-radius: 12px; margin-bottom: 20px; border: 1px solid #dee2e6; }
-    </style>
-</head>
-<body>
-
-    <nav class="navbar navbar-dark p-3 shadow-sm">
-        <div class="container">
-            <a href="/" class="navbar-brand fw-bold text-success">← BACK TO DASHBOARD</a>
-            <span class="navbar-text text-white fw-bold">VETLEM DEBT TRACKER</span>
-        </div>
-    </nav>
-
-    <div class="container mt-4">
-        {% with messages = get_flashed_messages() %}
-          {% if messages %}
-            {% for message in messages %}
-              <div class="alert alert-info alert-dismissible fade show shadow-sm mb-3" role="alert">
-                {{ message }}
-                <button type="button" class="btn-close" data-bs-dismiss="alert"></button>
-              </div>
-            {% endfor %}
-          {% endif %}
-        {% endwith %}
-
-        <div class="total-banner d-flex justify-content-between align-items-center shadow-sm">
-            <div>
-                <h6 class="text-muted small text-uppercase mb-1">Total Outstanding Debt</h6>
-                <h2 class="fw-bold text-danger mb-0">KES {{ "{:,.2f}".format(total) }}</h2>
-            </div>
-            <div class="text-end text-muted small">
-                <strong>Count:</strong> {{ records|length }} Records found
-            </div>
-        </div>
-
-        <div class="search-container shadow-sm">
-            <form action="/debtors" method="GET" class="row g-2">
-                <div class="col-md-9">
-                    <input type="text" name="search" class="form-control" 
-                           placeholder="Search by Farmer Name or Animal Tag..." 
-                           value="{{ search_val if search_val else '' }}">
-                </div>
-                <div class="col-md-3 d-grid gap-2 d-md-flex">
-                    <button type="submit" class="btn btn-dark w-100">Search</button>
-                    {% if search_val %}
-                        <a href="/debtors" class="btn btn-outline-secondary w-100">Reset</a>
-                    {% endif %}
-                </div>
-            </form>
-        </div>
-
-        <div class="card debt-card">
-            <div class="table-responsive">
-                <table class="table table-hover align-middle mb-0">
-                    <thead class="table-light">
-                        <tr class="small text-muted text-uppercase">
-                            <th class="ps-4">Farmer Details</th>
-                            <th>Animal & Meds</th>
-                            <th>Amount Due</th>
-                            <th class="text-center">Quick Actions</th>
-                        </tr>
-                    </thead>
-                    <tbody>
+<tbody>
                         {% for r in records %}
                         <tr>
                             <td class="ps-4">
@@ -89,18 +13,22 @@
                                 <span class="fw-bold text-danger">KES {{ "{:,.0f}".format(r.cost) }}</span>
                             </td>
                             <td class="text-center">
-                                <div class="d-flex justify-content-center gap-1 flex-wrap">
+                                <div class="d-flex justify-content-center gap-1 flex-wrap align-items-center">
                                     <a href="tel:{{ r.phone }}" class="btn btn-outline-primary btn-action">Call</a>
 
-                                    {% set wa_phone = r.phone.replace('+', '').replace('0', '254', 1) if r.phone.startswith('0') else r.phone.replace('+', '') %}
-                                    <a href="https://wa.me/{{ wa_phone }}?text=Habari%20{{ r.owner_name }},%20tunakukumbusha%20deni%20la%20KES%20{{ r.cost }}%20la%20matibabu%20ya%20{{ r.animal_id }}.%20Tafadhali%20tuma%20kwa%20M-Pesa.%20Asante!" 
-                                       target="_blank" class="btn btn-success btn-action">WhatsApp</a>
+                                    {% set wa_phone = r.phone.replace('+', '') %}
+                                    <a href="https://api.whatsapp.com/send?phone={{ wa_phone }}&text=Habari%20{{ r.owner_name }},%20huyu%20ni%20Daktari.%20Nakukumbusha%20salio%20lako%20la%20matibabu%20ya%20{{ r.animal_id }}%20ambayo%20ni%20KES%20{{ r.cost }}.%20Tafadhali%20fanya%20malipo%20ukipata%20nafasi.%20Asante." 
+                                       target="_blank" 
+                                       class="btn btn-success btn-action"
+                                       style="background-color: #25D366; border: none;">
+                                       WhatsApp
+                                    </a>
 
-                                    <form action="/send_reminder/{{ r.id }}" method="POST" class="d-inline">
+                                    <form action="/send_reminder/{{ r.id }}" method="POST" class="d-inline m-0">
                                         <button type="submit" class="btn btn-warning btn-action">SMS</button>
                                     </form>
 
-                                    <form action="/clear_debt/{{ r.id }}" method="POST" class="d-inline">
+                                    <form action="/clear_debt/{{ r.id }}" method="POST" class="d-inline m-0">
                                         <button type="submit" class="btn btn-dark btn-action" onclick="return confirm('Amelipa deni lote?')">Clear</button>
                                     </form>
                                 </div>
@@ -119,11 +47,3 @@
                         </tr>
                         {% endfor %}
                     </tbody>
-                </table>
-            </div>
-        </div>
-    </div>
-
-    <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/js/bootstrap.bundle.min.js"></script>
-</body>
-</html>
