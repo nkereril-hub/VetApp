@@ -1,4 +1,5 @@
 from flask import Flask, render_template, request, redirect, url_for, session, flash
+from urllib.parse import quote
 import sqlite3
 import os
 import psycopg2 
@@ -236,22 +237,40 @@ def whatsapp_reminder(tid):
     if 'user_id' not in session: return redirect(url_for('login'))
     db = get_db()
     cur = db.cursor()
-    
-    # Get the specific treatment/debt details
     cur.execute("SELECT * FROM treatments WHERE id = %s" if DATABASE_URL else "SELECT * FROM treatments WHERE id = ?", (tid,))
     debt = cur.fetchone()
     cur.close()
     db.close()
-
     if debt:
-        message = f"Habari {debt['owner_name']}, hii ni kumbukumbu ya deni la KES {debt['cost']} ya matibabu ya {debt['animal_id']}. Tafadhali lipa kupitia M-Pesa. Asante!"
-        # This opens WhatsApp Web or the App with the message ready
-        whatsapp_url = f"https://wa.me/{debt['phone']}?text={quote(message)}"
-        return redirect(whatsapp_url)
-    
-    flash("Record not found!")
+        msg = f"Habari {debt['owner_name']}, kumbukumbu ya deni lako la Vet-Tech ni KES {debt['cost']}. Tafadhali lipa kupitia M-Pesa. Asante!"
+        return redirect(f"https://wa.me/{debt['phone']}?text={quote(msg)}")
     return redirect(url_for('debtors'))
 
+@app.route('/send_sms/<int:tid>')
+def send_sms(tid):
+    if 'user_id' not in session: return redirect(url_for('login'))
+    db = get_db()
+    cur = db.cursor()
+    cur.execute("SELECT * FROM treatments WHERE id = %s" if DATABASE_URL else "SELECT * FROM treatments WHERE id = ?", (tid,))
+    debt = cur.fetchone()
+    cur.close()
+    db.close()
+    if debt:
+        return redirect(f"sms:{debt['phone']}?body=Deni lako la Vet-Tech ni KES {debt['cost']}")
+    return redirect(url_for('debtors'))
+
+@app.route('/clear_debt/<int:tid>')
+def clear_debt(tid):
+    if 'user_id' not in session: return redirect(url_for('login'))
+    db = get_db()
+    cur = db.cursor()
+    # This changes the record from 'Credit' to 'Cash' so it disappears from the Debtors list
+    cur.execute("UPDATE treatments SET payment_method = 'Cash' WHERE id = %s" if DATABASE_URL else "UPDATE treatments SET payment_method = 'Cash' WHERE id = ?", (tid,))
+    db.commit()
+    cur.close()
+    db.close()
+    flash("Deni cleared successfully!")
+    return redirect(url_for('debtors'))
 # --- PRODUCTION READY INIT ---
 # This runs on every startup, whether Gunicorn or Local
 with app.app_context():
