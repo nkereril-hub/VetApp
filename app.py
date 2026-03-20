@@ -218,7 +218,7 @@ def debtors():
     records = cur.fetchall()
 
     # 3. Get Total Debt
-    cur.execute("SELECT SUM(final_price) as total FROM treatments WHERE user_id = %s AND payment_method = 'Credit'" if DATABASE_URL else "SELECT SUM(final_price) as total FROM treatments WHERE user_id = ? AND payment_method = 'Credit'", (session['user_id'],))
+    cur.execute("SELECT SUM(cost) as total FROM treatments WHERE user_id = %s AND payment_method = 'Credit'" if DATABASE_URL else "SELECT SUM(cost) as total FROM treatments WHERE user_id = ? AND payment_method = 'Credit'", (session['user_id'],))
     total_row = cur.fetchone()
     
     # Handle the fact that Postgres returns a dict and SQLite might return a tuple/row
