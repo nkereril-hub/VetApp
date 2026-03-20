@@ -230,6 +230,27 @@ def debtors():
     db.close()
     
     return render_template('debtors.html', user=user, records=records, total=total_val or 0, search_val=search_query)
+    
+@app.route('/whatsapp_reminder/<int:tid>')
+def whatsapp_reminder(tid):
+    if 'user_id' not in session: return redirect(url_for('login'))
+    db = get_db()
+    cur = db.cursor()
+    
+    # Get the specific treatment/debt details
+    cur.execute("SELECT * FROM treatments WHERE id = %s" if DATABASE_URL else "SELECT * FROM treatments WHERE id = ?", (tid,))
+    debt = cur.fetchone()
+    cur.close()
+    db.close()
+
+    if debt:
+        message = f"Habari {debt['owner_name']}, hii ni kumbukumbu ya deni la KES {debt['cost']} ya matibabu ya {debt['animal_id']}. Tafadhali lipa kupitia M-Pesa. Asante!"
+        # This opens WhatsApp Web or the App with the message ready
+        whatsapp_url = f"https://wa.me/{debt['phone']}?text={quote(message)}"
+        return redirect(whatsapp_url)
+    
+    flash("Record not found!")
+    return redirect(url_for('debtors'))
 
 # --- PRODUCTION READY INIT ---
 # This runs on every startup, whether Gunicorn or Local
